@@ -1,134 +1,216 @@
 import pygame
 import sys
-import requests
-from io import BytesIO
 import random
 
-# Initialize pygame
+# === Game Configuration ===
+WINDOW_WIDTH, WINDOW_HEIGHT = 1280, 720
+GROUND_Y = 400
+FPS = 60
+
+# === Initialization ===
 pygame.init()
-
-# Set up screen
-WIDTH, HEIGHT = 800, 300
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Dino Game")
-
-# Clock
+screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
 clock = pygame.time.Clock()
-FPS = 30
+pygame.display.set_caption("Dino Game")
+game_font = pygame.font.Font("assets/PressStart2P-Regular.ttf", 24)
 
-# Colors
-WHITE = (255, 255, 255)
-BLACK = (0, 0, 0)
+# === Load Assets ===
+def load_scaled_image(path, size):
+    return pygame.transform.scale(pygame.image.load(path), size)
 
-# Load images from web
-def load_image_from_url(url):
-    response = requests.get(url)
-    return pygame.image.load(BytesIO(response.content)).convert_alpha()
+# === Classes ===
+class Dino(pygame.sprite.Sprite):
+    def __init__(self, x_pos, y_pos):
+        super().__init__()
+        self.running_frames = [
+            load_scaled_image("assets/Dino1.png", (50, 70)),
+            load_scaled_image("assets/Dino2.png", (50, 70))
+        ]
+        self.ducking_frames = [
+            load_scaled_image("assets/DinoDucking1.png", (70, 40)),
+            load_scaled_image("assets/DinoDucking2.png", (70, 40))
+        ]
+        self.is_ducking = False
+        self.frames = self.running_frames
+        self.current_frame = 0
+        self.image = self.frames[self.current_frame]
+        self.rect = self.image.get_rect(midbottom=(x_pos, y_pos))
+        self.original_bottom = y_pos
+        self.gravity = 0
+        self.jump_force = -30
+        self.gravity_increment = 2.0
+        self.animation_timer = 0
+        self.animation_interval = 100
+        self.collision_rect = self.rect.inflate(-20, -20)
 
-# Dino and cactus images
-dino_url = 'https://i.pinimg.com/736x/d7/cf/d7/d7cfd7fa57e2bbc4353d6d0c3b279597.jpg'
-cactus_url = 'https://media.gettyimages.com/id/1349703132/vector/cactus-sketch-illustration.jpg?s=612x612&w=gi&k=20&c=nwymXUxE8YYxVLrIuX3-Wd4Kq1Edv6gbahgha-TOuKM='
+    def jump(self):
+        if self.rect.bottom >= self.original_bottom:
+            self.gravity = self.jump_force
+            jump_sfx.play()
 
-dino_img = load_image_from_url(dino_url)
-cactus_img = load_image_from_url(cactus_url)
+    def duck(self):
+        if not self.is_ducking:
+            self.is_ducking = True
+            self.frames = self.ducking_frames
+            bottom = self.rect.bottom
+            self.image = self.frames[0]
+            self.rect = self.image.get_rect(midbottom=(self.rect.centerx, bottom))
 
-# Resize
-dino_img = pygame.transform.scale(dino_img, (60, 60))
-cactus_img = pygame.transform.scale(cactus_img, (40, 70))
+    def unduck(self):
+        if self.is_ducking:
+            self.is_ducking = False
+            self.frames = self.running_frames
+            bottom = self.rect.bottom
+            self.image = self.frames[0]
+            self.rect = self.image.get_rect(midbottom=(self.rect.centerx, bottom))
 
-# Dino settings
-dino_x = 50
-dino_y = HEIGHT - 100
-dino_jump = False
-jump_velocity = 0
+    def apply_gravity(self):
+        self.gravity += self.gravity_increment
+        self.rect.y += self.gravity
+        if self.rect.bottom >= self.original_bottom:
+            self.rect.bottom = self.original_bottom
+            self.gravity = 0
 
-# Cactus pattern settings
-cactus_groups = []
-cactus_speed = 7
+    def animate(self):
+        now = pygame.time.get_ticks()
+        if now - self.animation_timer > self.animation_interval:
+            self.current_frame = (self.current_frame + 1) % len(self.frames)
+            self.image = self.frames[self.current_frame]
+            self.animation_timer = now
 
-# Score
+    def update(self):
+        self.apply_gravity()
+        self.animate()
+        self.collision_rect = self.rect.inflate(-20, -20)
+
+class Cactus(pygame.sprite.Sprite):
+    def __init__(self):
+        super().__init__()
+        cactus_type = random.randint(1, 6)
+        self.image = load_scaled_image(f"assets/cacti/cactus{cactus_type}.png", (60, 80))
+        self.rect = self.image.get_rect(midbottom=(WINDOW_WIDTH, GROUND_Y))
+
+    def update(self):
+        self.rect.x -= game_speed
+        if self.rect.right < 0:
+            self.kill()
+
+class Ptero(pygame.sprite.Sprite):
+    def __init__(self):
+        super().__init__()
+        self.frames = [
+            load_scaled_image("assets/Ptero1.png", (80, 52)),
+            load_scaled_image("assets/Ptero2.png", (80, 52))
+        ]
+        self.image = self.frames[0]
+        self.rect = self.image.get_rect(midbottom=(WINDOW_WIDTH + 100, random.choice([280, 350])))
+        self.index = 0
+
+    def update(self):
+        self.index = (self.index + 0.1) % 2
+        self.image = self.frames[int(self.index)]
+        self.rect.x -= game_speed
+        if self.rect.right < 0:
+            self.kill()
+
+class Cloud(pygame.sprite.Sprite):
+    def __init__(self):
+        super().__init__()
+        self.image = load_scaled_image("assets/cloud.png", (200, 80))
+        self.rect = self.image.get_rect(midbottom=(WINDOW_WIDTH + 100, random.randint(50, 300)))
+
+    def update(self):
+        self.rect.x -= 1
+        if self.rect.right < 0:
+            self.kill()
+
+# === Sound Effects ===
+death_sfx = pygame.mixer.Sound("assets/sfx/lose.mp3")
+points_sfx = pygame.mixer.Sound("assets/sfx/100points.mp3")
+jump_sfx = pygame.mixer.Sound("assets/sfx/jump.mp3")
+
+# === Game Elements ===
+ground = load_scaled_image("assets/ground.png", (WINDOW_WIDTH, 20))
+ground_x = 0
+dino = Dino(100, GROUND_Y)
+dino_group = pygame.sprite.GroupSingle(dino)
+obstacle_group = pygame.sprite.Group()
+cloud_group = pygame.sprite.Group()
+
+# === Game Variables ===
+game_speed = 10
 score = 0
+game_over = False
+obstacle_timer = 0
+obstacle_cooldown = 800
 
-def create_cactus_group():
-    # Randomize the number of cacti in the group (1, 2, or 3)
-    num_cacti = random.choice([1, 2, 3])
-    group = []
-    x_start = WIDTH + random.randint(0, 200)
-    previous_cactus_x = x_start  # To control spacing between cacti
+# === Events ===
+CLOUD_EVENT = pygame.USEREVENT
+pygame.time.set_timer(CLOUD_EVENT, 3000)
 
-    # Randomize spacing between cacti in the group
-    for i in range(num_cacti):
-        # Adjust x based on the previous cactus' position and random spacing
-        cactus_x = previous_cactus_x + random.randint(80, 200)
-        cactus_y = HEIGHT - 90
-        group.append(pygame.Rect(cactus_x, cactus_y, cactus_img.get_width(), cactus_img.get_height()))
-        previous_cactus_x = cactus_x  # Update the previous cactus' position
+# === Game Loop ===
+while True:
+    screen.fill("white")
 
-    return group
-
-# Add the first cactus group
-cactus_groups.append(create_cactus_group())
-
-# Font for score
-font = pygame.font.SysFont('Arial', 30)
-
-# Main game loop
-running = True
-while running:
-    screen.fill(WHITE)
+    # Input Handling
+    keys = pygame.key.get_pressed()
+    if keys[pygame.K_DOWN]:
+        dino.duck()
+    else:
+        dino.unduck()
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
-            running = False
-
-        # Jump on key press
+            pygame.quit()
+            sys.exit()
+        if event.type == CLOUD_EVENT:
+            cloud_group.add(Cloud())
         if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_SPACE and not dino_jump:
-                dino_jump = True
-                jump_velocity = -15
+            if event.key in (pygame.K_SPACE, pygame.K_UP):
+                if game_over:
+                    game_over = False
+                    score = 0
+                    game_speed = 5
+                    obstacle_group.empty()
+                    cloud_group.empty()
+                dino.jump()
 
-    # Dino jump mechanics
-    if dino_jump:
-        dino_y += jump_velocity
-        jump_velocity += 1
-        if dino_y >= HEIGHT - 100:
-            dino_y = HEIGHT - 100
-            dino_jump = False
+    if not game_over:
+        score += 0.1
+        if int(score) % 100 == 0 and int(score) > 0:
+            points_sfx.play()
 
-    # Move and draw cactus groups
-    for group in cactus_groups:
-        for cactus in group:
-            cactus.x -= cactus_speed
-            screen.blit(cactus_img, (cactus.x, cactus.y))
+        game_speed += 0.0025
 
-    # Add new cactus group when the last group moves off screen
-    if cactus_groups[-1][0].x < WIDTH - random.randint(200, 400):
-        cactus_groups.append(create_cactus_group())
+        if pygame.time.get_ticks() - obstacle_timer >= obstacle_cooldown:
+            obstacle_group.add(Cactus() if random.random() < 0.7 else Ptero())
+            obstacle_timer = pygame.time.get_ticks()
 
-    # Remove cactus group off screen
-    if cactus_groups[0][-1].x < -50:
-        cactus_groups.pop(0)
-        score += 1  # Increment score when a group is removed
+        dino_group.update()
+        obstacle_group.update()
+        cloud_group.update()
 
-    # Collision detection
-    dino_rect = pygame.Rect(dino_x, dino_y, 60, 60)
-    for group in cactus_groups:
-        for cactus in group:
-            if dino_rect.colliderect(cactus):
-                # Display final score when game ends
-                print(f"Game Over! Final Score: {score}")
-                pygame.time.wait(1000)
-                running = False
+        if any(dino.collision_rect.colliderect(ob.rect) for ob in obstacle_group):
+            death_sfx.play()
+            game_over = True
 
-    # Draw dino
-    screen.blit(dino_img, (dino_x, dino_y))
+        if not game_over:
+            ground_x = 0 if ground_x <= -WINDOW_WIDTH else ground_x - game_speed
 
-    # Display the score
-    score_text = font.render(f"Score: {score}", True, BLACK)
-    screen.blit(score_text, (10, 10))
+    # Drawing
+    cloud_group.draw(screen)
+    screen.blit(ground, (ground_x, GROUND_Y))
+    screen.blit(ground, (ground_x + WINDOW_WIDTH, GROUND_Y))
+    dino_group.draw(screen)
+    obstacle_group.draw(screen)
+    score_text = game_font.render(str(int(score)), True, "black")
+    screen.blit(score_text, (1150, 10))
+
+    if game_over:
+        game_over_text = game_font.render("Game Over!", True, "black")
+        screen.blit(game_over_text, game_over_text.get_rect(center=(WINDOW_WIDTH / 2, 300)))
+        final_score_text = game_font.render(f"Score: {int(score)}", True, "black")
+        screen.blit(final_score_text, final_score_text.get_rect(center=(WINDOW_WIDTH / 2, 350)))
 
     pygame.display.update()
     clock.tick(FPS)
-
-pygame.quit()
-sys.exit()
